@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Marble Jar — Add Single Marble</title>
+<style>
+  :root{--bg:#eef2f5;--ui:#222;--btn:#2e7d32}
+  html,body{height:100%;margin:0;background:var(--bg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;}
+  .topbar{display:flex;gap:8px;align-items:center;padding:10px;background:transparent}
+  button{background:var(--btn);color:#fff;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:600}
+  button.gray{background:#666}
+  button:disabled{background:#aaa;cursor:not-allowed}
+  #count{margin-left:auto;font-weight:700;color:var(--ui)}
+  #canvasWrap{display:flex;justify-content:center;padding:12px}
+  canvas{background:#fff;border-radius:14px;border:3px solid #444;max-width:100%;height:auto}
+  .note{font-size:12px;color:#555;margin-left:8px}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button id="teacherLogin">Teacher Login</button>
+  <button id="addBtn" disabled>Add 1</button>
+  <button id="removeBtn" disabled>Remove 1</button>
+  <button id="resetBtn" disabled class="gray">Reset (Teacher)</button>
+  <div id="count">Marbles: 0</div>
+</div>
+
+<div id="canvasWrap">
+  <canvas id="c" width="900" height="500" aria-label="Marble jar"></canvas>
+</div>
+
+<script>
+/* Marble Jar — single-add version
+   - Save as index.html and publish on GitHub Pages
+   - Teacher password controlled. Change TEACHER_PASSWORD below if desired.
+*/
+
+const TEACHER_PASSWORD = "openup123"; // <-- change this to set your teacher password
+
+// Canvas + context
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+
+// Controls
+const teacherLogin = document.getElementById("teacherLogin");
+const addBtn = document.getElementById("addBtn");
+const removeBtn = document.getElementById("removeBtn");
+const resetBtn = document.getElementById("resetBtn");
+const countEl = document.getElementById("count");
+
+// Physics state
+let marbles = []; // each: {x,y,vx,vy,r,color}
+const GRAVITY = 0.2;
+const FRICTION = 0.995;
+const BOUNCE = 0.85;
+
+// Load from storage if present
+const STORAGE_KEY = "marbleJar_v1";
+try {
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) marbles = JSON.parse(saved);
+} catch(e){ marbles = []; }
+
+// Utility
+function rand(min, max){ return min + Math.random()*(max-min); }
+function randColor(){ return `hsl(${rand(0,360)},70%,55%)`; }
+
+// Create one marble at top center-ish (single add)
+function createMarble() {
+  const r = (window.innerWidth < 520) ? 14 : 18;
+  const x = canvas.width/2 + rand(-60,60);
+  const y = 30 + rand(-5,5);
+  const m = { x, y, vx: rand(-1.5,1.5), vy: rand(-0.5,0.5), r, color: randColor() };
+  marbles.push(m);
+  saveState();
+  updateCount();
+  return m;
+}
+
+function removeOne() {
+  if (marbles.length === 0) return;
+  marbles.pop();
+  saveState();
+  updateCount();
+}
+
+function resetJar() {
+  marbles = [];
+  saveState();
+  updateCount();
+}
+
+// Physics and collisions (pairwise simple)
+function stepPhysics() {
+  const W = canvas.width, H = canvas.height;
+  for (let i=0;i<marbles.length;i++){
+    const m = marbles[i];
+    m.vy += GRAVITY;
+    m.vx *= FRICTION; m.vy *= FRICTION;
+    m.x += m.vx; m.y += m.vy;
+
+    // walls
+    if (m.x - m.r < 0){ m.x = m.r; m.vx = -m.vx * BOUNCE; }
+    if (m.x + m.r > W){ m.x = W - m.r; m.vx = -m.vx * BOUNCE; }
+    if (m.y - m.r < 0){ m.y = m.r; m.vy = -m.vy * BOUNCE; }
+    if (m.y + m.r > H){ m.y = H - m.r; m.vy = -m.vy * BOUNCE; }
+
+    // collisions
+    for (let j=i+1;j<marbles.length;j++){
+      const n = marbles[j];
+      const dx = n.x - m.x;
+      const dy = n.y - m.y;
+      const dist = Math.hypot(dx,dy);
+      const minD = m.r + n.r;
+      if (dist > 0 && dist < minD){
+        const overlap = minD - dist;
+        const ux = dx / dist, uy = dy / dist;
+        // separate
+        m.x -= ux * overlap * 0.5;
+        m.y -= uy * overlap * 0.5;
+        n.x += ux * overlap * 0.5;
+        n.y += uy * overlap * 0.5;
+        // exchange velocities (simple)
+        const tvx = m.vx, tvy = m.vy;
+        m.vx = n.vx * 0.95; m.vy = n.vy * 0.95;
+        n.vx = tvx * 0.95; n.vy = tvy * 0.95;
+      }
+    }
+  }
+}
+
+// Draw glossy marble
+function drawMarble(m){
+  const g = ctx.createRadialGradient(m.x - m.r*0.35, m.y - m.r*0.35, m.r*0.1, m.x, m.y, m.r);
+  g.addColorStop(0,'rgba(255,255,255,0.95)');
+  g.addColorStop(0.15,'rgba(255,255,255,0.6)');
+  g.addColorStop(0.5, m.color);
+  g.addColorStop(1, 'rgba(0,0,0,0.08)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(m.x, m.y, m.r, 0, Math.PI*2);
+  ctx.fill();
+  // subtle outline
+  ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+// Render loop
+function render(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  stepPhysics();
+  for (const m of marbles) drawMarble(m);
+  updateCount();
+  requestAnimationFrame(render);
+}
+render();
+
+// persistence
+function saveState(){
+  try{
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(marbles));
+  }catch(e){}
+}
+
+function updateCount(){
+  countEl.textContent = `Marbles: ${marbles.length}`;
+}
+
+// Resize canvas responsively
+function resizeCanvas(){
+  // keep aspect ratio, scale internal buffer to CSS pixels
+  canvas.width = Math.min(window.innerWidth - 20, 1100);
+  canvas.height = Math.min(window.innerHeight - 140, 700);
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// wire controls (disabled until unlocked)
+addBtn.addEventListener('click', ()=> { createMarble(); });
+removeBtn.addEventListener('click', ()=> { removeOne(); });
+resetBtn.addEventListener('click', ()=> { 
+  if (!confirm('Reset jar? This will remove all marbles.')) return;
+  resetJar(); 
+});
+
+// Teacher login: toggles controls when correct password entered
+teacherLogin.addEventListener('click', ()=> {
+  const p = prompt('Enter teacher password:');
+  if (p === TEACHER_PASSWORD){
+    addBtn.disabled = false;
+    removeBtn.disabled = false;
+    resetBtn.disabled = false;
+    alert('Teacher controls unlocked.');
+  } else {
+    alert('Incorrect password.');
+  }
+});
+
+// on first load, if marbles exist, keep controls disabled (students see marbles only)
+updateCount();
+saveState();
+</script>
+</body>
+</html>
